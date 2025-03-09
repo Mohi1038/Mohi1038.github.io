@@ -14,27 +14,38 @@ if [ -f "$RUNTIME_FILE" ]; then
         case $SOFTWARE in
             nodejs)
                 echo "⚡ Installing Node.js v$VERSION..."
-                curl -fsSL "https://deb.nodesource.com/setup_$VERSION.x" | bash - || {
-                    echo "⚠️ Failed to fetch Node.js setup script. Falling back to default Node.js installation."
-                    apt-get update
-                    apt-get install -y nodejs npm
+                curl -fsSL "https://deb.nodesource.com/setup_$VERSION.x" | sudo -E bash - || {
+                    echo "⚠️ Failed to fetch Node.js setup script."
+                    exit 1
                 }
-                apt-get install -y nodejs npm || echo "⚠️ Node.js installation failed!"
+                sudo apt-get install -y nodejs || {
+                    echo "⚠️ Node.js installation failed!"
+                    exit 1
+                }
                 ;;
             python)
                 echo "🐍 Installing Python v$VERSION..."
-                apt-get update
-                apt-get install -y python$VERSION python$VERSION-venv python$VERSION-dev
+                sudo apt-get update
+                sudo apt-get install -y python$VERSION python$VERSION-venv python$VERSION-dev || {
+                    echo "⚠️ Python installation failed!"
+                    exit 1
+                }
                 ;;
             java)
                 echo "☕ Installing OpenJDK v$VERSION..."
-                apt-get update
-                apt-get install -y openjdk-$VERSION-jdk
+                sudo apt-get update
+                sudo apt-get install -y openjdk-$VERSION-jdk || {
+                    echo "⚠️ Java installation failed!"
+                    exit 1
+                }
                 ;;
             ruby)
                 echo "💎 Installing Ruby v$VERSION..."
-                apt-get update
-                apt-get install -y ruby$VERSION
+                sudo apt-get update
+                sudo apt-get install -y ruby$VERSION || {
+                    echo "⚠️ Ruby installation failed!"
+                    exit 1
+                }
                 ;;
             *)
                 echo "⚠️ Unknown runtime: $SOFTWARE-$VERSION"
@@ -48,12 +59,7 @@ fi
 echo "📦 Installing project dependencies..."
 cd "$APP_DIR"
 
-# Ensure npm is available before running npm install
 if [ -f "package.json" ]; then
-    if ! command -v npm &> /dev/null; then
-        echo "⚠️ npm is not installed! Installing manually..."
-        apt-get install -y npm
-    fi
     echo "📦 Running npm install..."
     npm install || echo "⚠️ npm install failed!"
 fi
