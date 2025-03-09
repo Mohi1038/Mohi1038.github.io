@@ -1,7 +1,7 @@
 #!/bin/bash
 
 REPO_NAME=$1
-APP_DIR="/root/$REPO_NAME"
+APP_DIR="/opt/$REPO_NAME"
 
 echo "🔍 Checking runtime.txt for dependencies..."
 RUNTIME_FILE="$APP_DIR/runtime.txt"
