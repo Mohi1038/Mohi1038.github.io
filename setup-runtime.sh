@@ -80,12 +80,14 @@ PROCFILE="$APP_DIR/Procfile"
 if [ -f "$PROCFILE" ]; then
     START_COMMAND=$(grep '^web:' "$PROCFILE" | sed 's/web: //')
     if [ -n "$START_COMMAND" ]; then
-        echo "🚀 Running: $START_COMMAND"
-        eval "$START_COMMAND"
+        echo "🚀 Running: $START_COMMAND in the background..."
+        nohup bash -c "$START_COMMAND" > /dev/null 2>&1 &
+        disown
     else
         echo "⚠️ No valid start command found in Procfile."
     fi
 else
     echo "⚠️ No Procfile found!"
 fi
+
 
