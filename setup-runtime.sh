@@ -14,8 +14,12 @@ if [ -f "$RUNTIME_FILE" ]; then
         case $SOFTWARE in
             nodejs)
                 echo "⚡ Installing Node.js v$VERSION..."
-                curl -fsSL https://deb.nodesource.com/setup_$VERSION.x | bash -
-                apt-get install -y nodejs
+                curl -fsSL "https://deb.nodesource.com/setup_$VERSION.x" | bash - || {
+                    echo "⚠️ Failed to fetch Node.js setup script. Falling back to default Node.js installation."
+                    apt-get update
+                    apt-get install -y nodejs npm
+                }
+                apt-get install -y nodejs npm || echo "⚠️ Node.js installation failed!"
                 ;;
             python)
                 echo "🐍 Installing Python v$VERSION..."
@@ -44,8 +48,12 @@ fi
 echo "📦 Installing project dependencies..."
 cd "$APP_DIR"
 
-# Install dependencies based on detected package managers
+# Ensure npm is available before running npm install
 if [ -f "package.json" ]; then
+    if ! command -v npm &> /dev/null; then
+        echo "⚠️ npm is not installed! Installing manually..."
+        apt-get install -y npm
+    fi
     echo "📦 Running npm install..."
     npm install || echo "⚠️ npm install failed!"
 fi
@@ -74,3 +82,4 @@ if [ -f "$PROCFILE" ]; then
 else
     echo "⚠️ No Procfile found!"
 fi
+
