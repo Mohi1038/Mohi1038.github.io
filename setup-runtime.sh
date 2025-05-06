@@ -48,64 +48,18 @@ install_runtimes() {
     fi
 }
 
-# Install project dependencies
-install_dependencies() {
-    echo "📦 Installing project dependencies..."
-    
-    # Node.js projects
-    if [ -f "package.json" ]; then
-        npm install || echo "⚠️ npm install failed"
-        
-        # Framework detection
-        if [ -f "vite.config.js" ]; then
-            echo "⚡ Vite project detected - building..."
-            npm run build
-            echo "BUILD_DIR=dist" >> "$APP_DIR/.deployment"
-        elif [ -f "next.config.js" ]; then
-            echo "➡️ Next.js project detected - building..."
-            npm run build
-            echo "BUILD_DIR=.next" >> "$APP_DIR/.deployment"
-        fi
-    fi
-
-    # Python projects
-    if [ -f "requirements.txt" ]; then
-        pip install -r requirements.txt || echo "⚠️ pip install failed"
-        
-        if [ -f "manage.py" ]; then
-            echo "🦄 Django detected - collecting static files..."
-            python manage.py collectstatic --noinput
-            echo "BUILD_DIR=staticfiles" >> "$APP_DIR/.deployment"
-        fi
-    fi
-
-    # Java projects
-    if [ -f "pom.xml" ]; then
-        mvn package || echo "⚠️ Maven build failed"
-        echo "BUILD_DIR=target" >> "$APP_DIR/.deployment"
-    fi
-
-    # Ruby projects
-    if [ -f "Gemfile" ]; then
-        bundle install || echo "⚠️ bundle install failed"
-        echo "BUILD_DIR=public" >> "$APP_DIR/.deployment"
-    fi
-}
-
-# Process Procfile if exists
+# Process Procfile
 process_procfile() {
     if [ -f "$PROCFILE" ]; then
         echo "🔍 Found Procfile - processing..."
-        
+
         # Extract web process command
         WEB_CMD=$(grep '^web:' "$PROCFILE" | sed 's/web: //')
         
         if [ -n "$WEB_CMD" ]; then
-            echo "🚀 Starting web process: $WEB_CMD"
-            
-            # Create a systemd service for persistence
+            echo "🚀 Setting up web process: $WEB_CMD"
             SERVICE_FILE="/etc/systemd/system/${REPO_NAME}.service"
-            
+
             cat > "$SERVICE_FILE" << EOF
 [Unit]
 Description=$REPO_NAME web process
@@ -123,32 +77,31 @@ Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/u
 WantedBy=multi-user.target
 EOF
 
-            # Enable and start service
             systemctl daemon-reload
             systemctl enable "${REPO_NAME}.service"
             systemctl start "${REPO_NAME}.service"
-            
+
             echo "🔄 Created systemd service: ${REPO_NAME}.service"
         else
             echo "⚠️ No valid web process found in Procfile"
         fi
-        
-        # Extract worker process if exists
+
+        # Extract worker process
         WORKER_CMD=$(grep '^worker:' "$PROCFILE" | sed 's/worker: //')
         if [ -n "$WORKER_CMD" ]; then
-            echo "👷 Starting worker process in background: $WORKER_CMD"
+            echo "👷 Running worker process in background: $WORKER_CMD"
             nohup bash -c "cd $APP_DIR && $WORKER_CMD" > "$APP_DIR/worker.log" 2>&1 &
         fi
+
     else
         echo "ℹ️ No Procfile found - skipping process management"
     fi
 }
 
-# Main execution
+# Main
 cd "$APP_DIR" || exit 1
 
 install_runtimes
-install_dependencies
 process_procfile
 
 # Final permissions
