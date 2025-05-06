@@ -37,6 +37,10 @@ BACKEND_PORT=$8
 
 OUTPUT_FILE="/etc/nginx/conf.d/$FILE_NAME.conf"
 
+# Load deployment config
+APP_DIR="/root/$(basename "$FILE_NAME" .conf)"
+[ -f "$APP_DIR/.deployment" ] && source "$APP_DIR/.deployment"
+
 # Validate that ports are numbers if they are present
 # For frontend
 if [ "$FRONTEND_PRESENT" == "yes" ] && ! [[ "$FRONTEND_PORT" =~ ^[0-9]+$ ]]; then
@@ -50,39 +54,61 @@ if [ "$BACKEND_PRESENT" == "yes" ] && ! [[ "$BACKEND_PORT" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-# Write the Nginx configuration to the file
-cat > $OUTPUT_FILE << EOF
-server {
-    listen 80;
-    listen [::]:80;
-    server_name $DOMAIN;
-    index index.html;
-EOF
+# Generate config
+{
+echo "server {"
+echo "    listen 80;"
+echo "    listen [::]:80;"
+echo "    server_name $DOMAIN;"
+echo "    client_max_body_size 100M;"
 
+# Frontend configuration
 if [ "$FRONTEND_PRESENT" == "yes" ]; then
-    echo "
-    # Frontend app
-    location $FRONTEND_ROUTE {
-        proxy_pass http://localhost:$FRONTEND_PORT;
-        try_files \$uri \$uri/ /index.html;
-    }" >> $OUTPUT_FILE
+    if [ -n "$BUILD_DIR" ] && [ -d "$BUILD_DIR" ]; then
+        echo "    root $BUILD_DIR;"
+        echo "    index index.html;"
+        echo "    location $FRONTEND_ROUTE {"
+        echo "        try_files \$uri \$uri/ /index.html;"
+        echo "    }"
+    else
+        echo "    location $FRONTEND_ROUTE {"
+        echo "        proxy_pass http://localhost:$FRONTEND_PORT;"
+        echo "        proxy_http_version 1.1;"
+        echo "        proxy_set_header Upgrade \$http_upgrade;"
+        echo "        proxy_set_header Connection 'upgrade';"
+        echo "        proxy_set_header Host \$host;"
+        echo "    }"
+    fi
 fi
 
+# Backend configuration
 if [ "$BACKEND_PRESENT" == "yes" ]; then
-    echo "
-    # Backend API requests
-    location $BACKEND_ROUTE {
-        proxy_pass http://localhost:$BACKEND_PORT;
-        proxy_set_header Host \$host;
-    }" >> $OUTPUT_FILE
+    echo "    location $BACKEND_ROUTE {"
+    echo "        proxy_pass http://localhost:$BACKEND_PORT;"
+    echo "        proxy_set_header Host \$host;"
+    echo "        proxy_set_header X-Real-IP \$remote_addr;"
+    echo "        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;"
+    echo "    }"
 fi
 
-echo "}" >> $OUTPUT_FILE
+# Security headers
+echo "    add_header X-Frame-Options \"DENY\";"
+echo "    add_header X-Content-Type-Options \"nosniff\";"
+echo "    add_header Content-Security-Policy \"default-src 'self';\";"
+echo "}"
+} > "$OUTPUT_FILE"
 
-# Check if the file was created successfully or not
-if [ ! -f "$OUTPUT_FILE" ]; then
-    echo "Failed to create the Nginx configuration file."
+# Verify and reload
+if [ -f "$OUTPUT_FILE" ]; then
+    if nginx -t; then
+        systemctl restart nginx
+        echo "✅ Nginx config created at $OUTPUT_FILE"
+        echo "🌐 Access your app at: http://$DOMAIN"
+    else
+        echo "❌ Nginx configuration test failed"
+        exit 1
+    fi
+else
+    echo "❌ Failed to create config file"
     exit 1
 fi
-
-echo "Nginx configuration created at $OUTPUT_FILE"
