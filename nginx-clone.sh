@@ -75,4 +75,13 @@ else
 fi
 check_status "Repository cloning"
 
+# Set universal permissions
+echo "Setting permissions..."
+sudo chown -R $USER:www-data "$PROJECT_DIR"
+sudo chmod -R 775 "$PROJECT_DIR"
+
+# Create deployment marker
+echo "BUILD_TYPE=auto" > "$PROJECT_DIR/.deployment"
+echo "DEPLOYMENT_ROOT=$PROJECT_DIR" >> "$PROJECT_DIR/.deployment"
+
 echo "Setup complete! The repository is cloned at $PROJECT_DIR."
