@@ -2,48 +2,50 @@
 
 # Check if running with sudo privileges
 if [ "$EUID" -ne 0 ]; then
-  echo "Please run with sudo privileges to write to /etc/nginx/conf.d/"
-  exit 1
+    echo "❌ Please run with sudo privileges to write to /etc/nginx/conf.d/"
+    exit 1
 fi
 
 # Check if Nginx is installed
 if ! command -v nginx &> /dev/null; then
-    echo "Nginx is not installed. Please install Nginx first."
+    echo "❌ Nginx is not installed. Please install Nginx first."
     exit 1
 fi
 
-# Check if /etc/nginx/conf.d/ exists
+# Ensure /etc/nginx/conf.d/ exists
 if [ ! -d "/etc/nginx/conf.d" ]; then
-    echo "/etc/nginx/conf.d/ directory does not exist. Creating it..."
+    echo "📁 /etc/nginx/conf.d/ directory does not exist. Creating it..."
     mkdir -p /etc/nginx/conf.d/
 fi
 
-# Check arguments
+# Check argument count
 if [ "$#" -ne 8 ]; then
     echo "Usage: $0 <file-name> <ip/domain> <frontend: yes/no> <frontend-route> <frontend-port> <backend: yes/no> <backend-route> <backend-port>"
     exit 1
 fi
 
 # Assign arguments
-FILE_NAME=$1
-DOMAIN=$2
-FRONTEND_PRESENT=$3
-FRONTEND_ROUTE=$4
-FRONTEND_PORT=$5
-BACKEND_PRESENT=$6
-BACKEND_ROUTE=$7
-BACKEND_PORT=$8
+FILE_NAME="$1"
+DOMAIN="$2"
+FRONTEND_PRESENT="$3"
+FRONTEND_ROUTE="$4"
+FRONTEND_PORT="$5"
+BACKEND_PRESENT="$6"
+BACKEND_ROUTE="$7"
+BACKEND_PORT="$8"
 
 OUTPUT_FILE="/etc/nginx/conf.d/$FILE_NAME.conf"
 APP_DIR="/root/$(basename "$FILE_NAME" .conf)"
 
-# Load deployment config
-[ -f "$APP_DIR/.deployment" ] && source "$APP_DIR/.deployment"
+# Load deployment config if it exists
+if [ -f "$APP_DIR/.deployment" ]; then
+    source "$APP_DIR/.deployment"
+fi
 
-# Validate ports
+# Validate port function
 validate_port() {
     if ! [[ "$1" =~ ^[0-9]+$ ]] || [ "$1" -lt 1 ] || [ "$1" -gt 65535 ]; then
-        echo "Error: Invalid port number $1"
+        echo "❌ Error: Invalid port number '$1'"
         exit 1
     fi
 }
@@ -51,7 +53,7 @@ validate_port() {
 [ "$FRONTEND_PRESENT" == "yes" ] && validate_port "$FRONTEND_PORT"
 [ "$BACKEND_PRESENT" == "yes" ] && validate_port "$BACKEND_PORT"
 
-# Generate config
+# Generate Nginx config
 {
 echo "server {"
 echo "    listen 80;"
@@ -59,7 +61,7 @@ echo "    listen [::]:80;"
 echo "    server_name $DOMAIN;"
 echo "    client_max_body_size 100M;"
 
-# Frontend
+# Frontend handling
 if [ "$FRONTEND_PRESENT" == "yes" ]; then
     if [ -n "$BUILD_DIR" ] && [ -d "$BUILD_DIR" ]; then
         echo "    root $BUILD_DIR;"
@@ -79,7 +81,7 @@ if [ "$FRONTEND_PRESENT" == "yes" ]; then
     fi
 fi
 
-# Backend
+# Backend handling
 if [ "$BACKEND_PRESENT" == "yes" ]; then
     echo "    location $BACKEND_ROUTE {"
     echo "        proxy_pass http://localhost:$BACKEND_PORT;"
@@ -92,26 +94,20 @@ if [ "$BACKEND_PRESENT" == "yes" ]; then
     echo "    }"
 fi
 
-# Security Headers
+# Security headers
 echo "    add_header X-Frame-Options \"DENY\";"
 echo "    add_header X-Content-Type-Options \"nosniff\";"
 echo "    add_header Content-Security-Policy \"default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';\";"
 echo "}"
 } > "$OUTPUT_FILE"
 
-# Validate and reload
+# Test and reload Nginx
 if nginx -t; then
     systemctl reload nginx
     echo "✅ Nginx config created at $OUTPUT_FILE"
     echo "🌐 Access your app at: http://$DOMAIN"
-    
-    # Show PM2 status if relevant
-    if command -v pm2 &> /dev/null; then
-        echo ""
-        echo "🔄 PM2 Process Status:"
-        pm2 list
-    fi
 else
     echo "❌ Nginx configuration test failed."
     exit 1
 fi
+
