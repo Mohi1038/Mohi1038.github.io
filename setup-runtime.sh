@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Universal runtime setup with Procfile support
+# Universal runtime setup with Procfile and PM2 support
 
 REPO_NAME="$1"
 APP_DIR="/root/$REPO_NAME"
@@ -48,53 +48,52 @@ install_runtimes() {
     fi
 }
 
-# Process Procfile
+# Process Procfile with PM2
 process_procfile() {
     if [ -f "$PROCFILE" ]; then
-        echo "🔍 Found Procfile - processing..."
-
-        # Extract web process command
-        WEB_CMD=$(grep '^web:' "$PROCFILE" | sed 's/web: //')
+        echo "🔍 Found Procfile - processing with PM2..."
         
-        if [ -n "$WEB_CMD" ]; then
-            echo "🚀 Setting up web process: $WEB_CMD"
-            SERVICE_FILE="/etc/systemd/system/${REPO_NAME}.service"
-
-            cat > "$SERVICE_FILE" << EOF
-[Unit]
-Description=$REPO_NAME web process
-After=network.target
-
-[Service]
-User=$USER
-WorkingDirectory=$APP_DIR
-ExecStart=/bin/bash -c '$WEB_CMD'
-Restart=always
-Environment=NODE_ENV=production
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-            systemctl daemon-reload
-            systemctl enable "${REPO_NAME}.service"
-            systemctl start "${REPO_NAME}.service"
-
-            echo "🔄 Created systemd service: ${REPO_NAME}.service"
-        else
-            echo "⚠️ No valid web process found in Procfile"
+        # Install project dependencies if package.json exists
+        if [ -f "$APP_DIR/package.json" ]; then
+            echo "📦 Installing Node.js dependencies..."
+            npm install --prefix "$APP_DIR"
         fi
 
-        # Extract worker process
-        WORKER_CMD=$(grep '^worker:' "$PROCFILE" | sed 's/worker: //')
-        if [ -n "$WORKER_CMD" ]; then
-            echo "👷 Running worker process in background: $WORKER_CMD"
-            nohup bash -c "cd $APP_DIR && $WORKER_CMD" > "$APP_DIR/worker.log" 2>&1 &
-        fi
+        # Process each line in Procfile
+        while read -r line; do
+            if [[ $line == web:* ]]; then
+                process_name="web"
+                command="${line#web: }"
+            elif [[ $line == worker:* ]]; then
+                process_name="worker"
+                command="${line#worker: }"
+            else
+                process_name="process-$((RANDOM % 1000))"
+                command="$line"
+            fi
 
+            echo "🚀 Starting $process_name with PM2: $command"
+            pm2 start "$command" --name "$REPO_NAME-$process_name" --cwd "$APP_DIR"
+        done < "$PROCFILE"
+
+        # Save PM2 process list
+        pm2 save
+        pm2 startup
+        echo "PM2 startup command:"
+        eval "pm2 startup | tail -n 1"
+        
     else
-        echo "ℹ️ No Procfile found - skipping process management"
+        echo "ℹ️ No Procfile found - checking for common project types..."
+        
+        # Auto-detect common project types
+        if [ -f "$APP_DIR/package.json" ]; then
+            echo "📦 Node.js project detected"
+            if grep -q '"start"' "$APP_DIR/package.json"; then
+                echo "🚀 Starting Node.js app with PM2"
+                pm2 start "npm start" --name "$REPO_NAME" --cwd "$APP_DIR"
+                pm2 save
+            fi
+        fi
     fi
 }
 
@@ -109,4 +108,5 @@ sudo chown -R $USER:www-data "$APP_DIR"
 sudo chmod -R 775 "$APP_DIR"
 
 echo "✅ Runtime setup complete"
-
+echo "🔍 PM2 Process List:"
+pm2 list
