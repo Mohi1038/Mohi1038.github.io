@@ -81,33 +81,50 @@ install_runtime() {
 # DEPENDENCY INSTALLATION
 # ----------------------------
 install_dependencies() {
-    cd "$APP_SUBFOLDER"
-    
-    # Check for dependency files in project root
-    if [ -f "package.json" ]; then
-        echo "📦 Installing Node.js dependencies"
-        npm install
-        [ -f "package-lock.json" ] && rm package-lock.json
-        if grep -q '"build"' package.json; then
-            echo "🏗️ Running build script"
-            npm run build
+    local found=0
+    for dir in "$APP_SUBFOLDER" "$APP_SUBFOLDER"/*; do
+        if [ -d "$dir" ]; then
+            cd "$dir"
+            if [ -f "package.json" ]; then
+                echo "📦 Installing Node.js dependencies in $dir"
+                npm install
+                [ -f "package-lock.json" ] && rm package-lock.json
+                if grep -q '"build"' package.json; then
+                    echo "🏗️ Running build script"
+                    npm run build
+                fi
+                found=1
+                break
+            elif [ -f "requirements.txt" ]; then
+                echo "🐍 Installing Python dependencies in $dir"
+                pip3 install -r requirements.txt
+                found=1
+                break
+            elif [ -f "Gemfile" ]; then
+                echo "💎 Installing Ruby dependencies in $dir"
+                bundle install
+                found=1
+                break
+            elif [ -f "pom.xml" ]; then
+                echo "☕ Building Java project in $dir"
+                mvn clean package
+                found=1
+                break
+            elif [ -f "go.mod" ]; then
+                echo "🦫 Building Go project in $dir"
+                go build
+                found=1
+                break
+            elif [ -f "composer.json" ]; then
+                echo "🐘 Installing PHP dependencies in $dir"
+                composer install
+                found=1
+                break
+            fi
         fi
-    elif [ -f "requirements.txt" ]; then
-        echo "🐍 Installing Python dependencies"
-        pip3 install -r requirements.txt
-    elif [ -f "Gemfile" ]; then
-        echo "💎 Installing Ruby dependencies"
-        bundle install
-    elif [ -f "pom.xml" ]; then
-        echo "☕ Building Java project"
-        mvn clean package
-    elif [ -f "go.mod" ]; then
-        echo "🦫 Building Go project"
-        go build
-    elif [ -f "composer.json" ]; then
-        echo "🐘 Installing PHP dependencies"
-        composer install
-    else
+    done
+    
+    if [ "$found" -eq 0 ]; then
         echo "ℹ️ No recognized build files found - skipping dependency installation"
     fi
 }
