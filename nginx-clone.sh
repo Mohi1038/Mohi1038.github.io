@@ -78,9 +78,4 @@ echo "Setting permissions..."
 sudo chown -R root:www-data "$PROJECT_DIR"
 sudo chmod -R 775 "$PROJECT_DIR"
 
-# Create deployment marker
-echo "Creating deployment marker..."
-echo "BUILD_TYPE=auto" > "$PROJECT_DIR/.deployment"
-echo "DEPLOYMENT_ROOT=$PROJECT_DIR" >> "$PROJECT_DIR/.deployment"
-
 echo "✅ Setup complete! The repository is cloned at $PROJECT_DIR."
