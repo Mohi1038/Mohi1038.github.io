@@ -130,7 +130,7 @@ install_dependencies() {
 }
 
 # ----------------------------
-# SERVICE CREATION
+# SERVICE CREATION (IMPROVED RELIABILITY)
 # ----------------------------
 create_service() {
     local procfile=$(find "$APP_SUBFOLDER" -maxdepth 1 -name "Procfile" | head -1)
@@ -150,7 +150,7 @@ create_service() {
         if [[ "$process_type" == "web" ]]; then
             echo "🚀 Found web process command: $command"
             
-            # Get the absolute working directory
+            # Get absolute working directory
             local working_dir=$(dirname "$(realpath "$procfile")")
             
             sudo bash -c "cat > /etc/systemd/system/${REPO_NAME}.service" <<EOF
@@ -170,23 +170,31 @@ Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WantedBy=multi-user.target
 EOF
 
+            # Reload and enable
             sudo systemctl daemon-reload
             sudo systemctl enable "${REPO_NAME}"
             
-            # Add a small delay before checking status
-            sleep 2
-            
+            # Start with health check
+            echo "⏳ Starting service..."
             if ! sudo systemctl start "${REPO_NAME}"; then
-                echo "❌ Failed to start service"
-                echo "📜 Showing journal logs:"
-                sudo journalctl -u "${REPO_NAME}" -n 20 --no-pager
+                echo "❌ Initial start failed, retrying once..."
+                sleep 2
+                sudo systemctl restart "${REPO_NAME}" || {
+                    echo "❌ Critical: Service failed to start"
+                    journalctl -u "${REPO_NAME}" -n 15 --no-pager
+                    exit 1
+                }
+            fi
+
+            # Verify status
+            sleep 1 # Brief pause for process spawn
+            if ! sudo systemctl is-active --quiet "${REPO_NAME}"; then
+                echo "⚠️ Service registered but not active, checking logs..."
+                journalctl -u "${REPO_NAME}" -n 10 --no-pager
                 exit 1
             fi
-            
-            echo "✅ Service created and started"
-            echo "💡 Debug tips:"
-            echo "   sudo systemctl status ${REPO_NAME}"
-            echo "   journalctl -u ${REPO_NAME} -f"
+
+            echo "✅ Service created and running"
             return
         fi
     done < "$procfile"
@@ -212,6 +220,6 @@ install_dependencies
 # 4. Create and start service
 create_service
 
-echo "🎉 Universal deployment completed successfully!"
-echo "🔍 Check service status: sudo systemctl status $REPO_NAME"
+echo "🎉 Deployment completed successfully!"
+echo "🔍 Check service: sudo systemctl status $REPO_NAME"
 echo "📜 View logs: journalctl -u $REPO_NAME -f"
