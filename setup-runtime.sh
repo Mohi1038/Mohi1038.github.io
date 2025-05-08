@@ -135,20 +135,23 @@ install_dependencies() {
 create_service() {
     local procfile=$(find "$APP_SUBFOLDER" -maxdepth 1 -name "Procfile" | head -1)
     [ -z "$procfile" ] && procfile=$(find "$APP_DIR" -maxdepth 1 -name "Procfile" | head -1)
-    
+
     if [ -z "$procfile" ]; then
         echo "⚠️ No Procfile found - cannot create service"
         exit 1
     fi
-    
+
     echo "🔍 Found Procfile at $procfile"
-    
+
     while IFS=':' read -r process_type command; do
         process_type=$(echo "$process_type" | xargs)
         command=$(echo "$command" | xargs)
         
         if [[ "$process_type" == "web" ]]; then
             echo "🚀 Found web process command: $command"
+            
+            # Get the absolute working directory
+            local working_dir=$(dirname "$(realpath "$procfile")")
             
             sudo bash -c "cat > /etc/systemd/system/${REPO_NAME}.service" <<EOF
 [Unit]
@@ -157,9 +160,10 @@ After=network.target
 
 [Service]
 User=root
-WorkingDirectory=$(dirname "$procfile")
+WorkingDirectory=$working_dir
 ExecStart=/bin/bash -c "$command"
 Restart=always
+RestartSec=5s
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 [Install]
@@ -168,17 +172,25 @@ EOF
 
             sudo systemctl daemon-reload
             sudo systemctl enable "${REPO_NAME}"
+            
+            # Add a small delay before checking status
+            sleep 2
+            
             if ! sudo systemctl start "${REPO_NAME}"; then
                 echo "❌ Failed to start service"
                 echo "📜 Showing journal logs:"
                 sudo journalctl -u "${REPO_NAME}" -n 20 --no-pager
                 exit 1
             fi
+            
             echo "✅ Service created and started"
+            echo "💡 Debug tips:"
+            echo "   sudo systemctl status ${REPO_NAME}"
+            echo "   journalctl -u ${REPO_NAME} -f"
             return
         fi
     done < "$procfile"
-    
+
     echo "⚠️ No web process found in Procfile"
     exit 1
 }
