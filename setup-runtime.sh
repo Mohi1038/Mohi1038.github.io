@@ -8,7 +8,6 @@ APP_DIR="/root/$REPO_NAME"
 find_project_root() {
     local current_dir="$1"
     
-    # Look for typical root markers in current directory
     for marker in Procfile runtime.txt package.json requirements.txt Gemfile pom.xml; do
         if [ -f "$current_dir/$marker" ]; then
             echo "$current_dir"
@@ -16,7 +15,6 @@ find_project_root() {
         fi
     done
     
-    # Check immediate subdirectories if nothing found in root
     for subdir in "$current_dir"/*; do
         if [ -d "$subdir" ]; then
             for marker in Procfile runtime.txt package.json requirements.txt Gemfile pom.xml; do
@@ -28,7 +26,6 @@ find_project_root() {
         fi
     done
     
-    # Fallback to provided directory if nothing found
     echo "$current_dir"
 }
 
@@ -130,7 +127,7 @@ install_dependencies() {
 }
 
 # ----------------------------
-# SERVICE CREATION (IMPROVED RELIABILITY)
+# SERVICE CREATION (WITH CRITICAL FIXES)
 # ----------------------------
 create_service() {
     local procfile=$(find "$APP_SUBFOLDER" -maxdepth 1 -name "Procfile" | head -1)
@@ -153,6 +150,10 @@ create_service() {
             # Get absolute working directory
             local working_dir=$(dirname "$(realpath "$procfile")")
             
+            # Auto-detect port from command if available
+            local detected_port=$(echo "$command" | grep -oE '\-\-port[ =]([0-9]+)' | awk '{print $2}')
+            [ -z "$detected_port" ] && detected_port=$(echo "$command" | grep -oE '\-p ([0-9]+)' | awk '{print $2}')
+
             sudo bash -c "cat > /etc/systemd/system/${REPO_NAME}.service" <<EOF
 [Unit]
 Description=$REPO_NAME Service
@@ -165,6 +166,7 @@ ExecStart=/bin/bash -c "$command"
 Restart=always
 RestartSec=5s
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+${detected_port:+Environment=PORT=$detected_port}
 
 [Install]
 WantedBy=multi-user.target
@@ -173,29 +175,30 @@ EOF
             # Reload and enable
             sudo systemctl daemon-reload
             sudo systemctl enable "${REPO_NAME}"
-            
-            # Start with health check
-            echo "⏳ Starting service..."
-            if ! sudo systemctl start "${REPO_NAME}"; then
-                echo "❌ Initial start failed, retrying once..."
+
+            # Start with retry logic
+            echo "⏳ Starting service (with retries)..."
+            for attempt in {1..3}; do
+                if sudo systemctl start "${REPO_NAME}"; then
+                    sleep 3 # Critical wait period
+                    if sudo systemctl is-active --quiet "${REPO_NAME}"; then
+                        # Verify port if detected
+                        if [ -n "$detected_port" ] && ! nc -z localhost "$detected_port"; then
+                            echo "⚠️ Service running but port $detected_port not listening (attempt $attempt)"
+                            [ $attempt -lt 3 ] && sleep 2 && continue
+                        fi
+                        echo "✅ Service successfully started"
+                        return
+                    fi
+                fi
+                echo "⚠️ Attempt $attempt failed, retrying..."
                 sleep 2
-                sudo systemctl restart "${REPO_NAME}" || {
-                    echo "❌ Critical: Service failed to start"
-                    journalctl -u "${REPO_NAME}" -n 15 --no-pager
-                    exit 1
-                }
-            fi
+            done
 
-            # Verify status
-            sleep 1 # Brief pause for process spawn
-            if ! sudo systemctl is-active --quiet "${REPO_NAME}"; then
-                echo "⚠️ Service registered but not active, checking logs..."
-                journalctl -u "${REPO_NAME}" -n 10 --no-pager
-                exit 1
-            fi
-
-            echo "✅ Service created and running"
-            return
+            echo "❌ Failed to start service after 3 attempts"
+            echo "📜 Last logs:"
+            journalctl -u "${REPO_NAME}" -n 15 --no-pager
+            exit 1
         fi
     done < "$procfile"
 
@@ -206,18 +209,11 @@ EOF
 # ----------------------------
 # MAIN DEPLOYMENT LOGIC
 # ----------------------------
-
-# 1. Find the actual project root
 APP_SUBFOLDER=$(find_project_root "$APP_DIR")
 echo "📂 Detected project root: $APP_SUBFOLDER"
 
-# 2. Install required runtime
 install_runtime
-
-# 3. Install project dependencies
 install_dependencies
-
-# 4. Create and start service
 create_service
 
 echo "🎉 Deployment completed successfully!"
