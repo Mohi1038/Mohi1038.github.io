@@ -1,30 +1,31 @@
 #!/bin/bash
 
-# USAGE:
-# sudo ./nginx-file.sh <file-name> <domain> <frontend: yes/no> <frontend-route> <frontend-port> <backend: yes/no> <backend-route> <backend-port>
-
-# Example:
-# sudo ./nginx-file.sh demo yourdomain.com yes / 5173 yes /api 3000
-
+# Check if running with sudo privileges to write in /etc/nginx/conf.d/
+# because it is protected and require root acces
 if [ "$EUID" -ne 0 ]; then
-  echo "❌ Please run with sudo privileges (root access required for /etc/nginx/conf.d/)"
+  echo "Please run with sudo privileges to write to /etc/nginx/conf.d/"
   exit 1
 fi
 
 # Check if Nginx is installed
-if ! command -v nginx &>/dev/null; then
-  echo "❌ Nginx is not installed. Please install Nginx first."
-  exit 1
+if ! command -v nginx &> /dev/null; then
+    echo "Nginx is not installed. Please install Nginx first."
+    exit 1
 fi
 
-# Validate number of args
+# Check if /etc/nginx/conf.d/ exists, create it if not
+if [ ! -d "/etc/nginx/conf.d" ]; then
+    echo "/etc/nginx/conf.d/ directory does not exist. Creating it..."
+    mkdir -p /etc/nginx/conf.d/
+fi
+
+# Check if enough arguments are passed
 if [ "$#" -ne 8 ]; then
-  echo "Usage: $0 <file-name> <domain> <frontend: yes/no> <frontend-route> <frontend-port> <backend: yes/no> <backend-route> <backend-port>"
-  echo "Example: $0 demo yourdomain.com yes / 5173 yes /api 3000"
-  exit 1
+    echo "Usage: $0 <file-name> <ip/domain> <frontend: yes/no> <frontend-route> <frontend-port> <backend: yes/no> <backend-route> <backend-port>"
+    exit 1
 fi
 
-# Input variables
+# Assign input arguments
 FILE_NAME=$1
 DOMAIN=$2
 FRONTEND_PRESENT=$3
@@ -34,106 +35,68 @@ BACKEND_PRESENT=$6
 BACKEND_ROUTE=$7
 BACKEND_PORT=$8
 
-CONF_PATH="/etc/nginx/conf.d/$FILE_NAME.conf"
+OUTPUT_FILE="/etc/nginx/conf.d/$FILE_NAME.conf"
 
 # Validate that ports are numbers if they are present
-# For frontend
 if [ "$FRONTEND_PRESENT" == "yes" ] && ! [[ "$FRONTEND_PORT" =~ ^[0-9]+$ ]]; then
     echo "Error: Frontend port must be a numeric value."
     exit 1
 fi
 
-# For backend
 if [ "$BACKEND_PRESENT" == "yes" ] && ! [[ "$BACKEND_PORT" =~ ^[0-9]+$ ]]; then
     echo "Error: Backend port must be a numeric value."
     exit 1
 fi
 
-# Write the base server block
-cat > "$CONF_PATH" <<EOF
+# Write the Nginx configuration to the file
+cat > $OUTPUT_FILE << EOF
 server {
     listen 80;
+    listen [::]:80;
     server_name $DOMAIN;
-
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN";
-    add_header X-Content-Type-Options "nosniff";
-    add_header Referrer-Policy "strict-origin-when-cross-origin";
-
-    # Enable compression
-    gzip on;
-    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
-    gzip_min_length 1024;
-    gzip_proxied any;
-
-    # Error handling
-    error_log /var/log/nginx/${FILE_NAME}_error.log warn;
-    access_log /var/log/nginx/${FILE_NAME}_access.log;
-
-    client_max_body_size 100M;
+    index index.html;
 EOF
 
-# Add frontend route if applicable
 if [ "$FRONTEND_PRESENT" == "yes" ]; then
-  cat >> "$CONF_PATH" <<EOF
-
-    # Frontend configuration
+    echo "
+    # Frontend app
     location $FRONTEND_ROUTE {
         proxy_pass http://localhost:$FRONTEND_PORT;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
-    }
-EOF
+        try_files \$uri \$uri/ /index.html;
+    }" >> $OUTPUT_FILE
 fi
 
-# Add backend route if applicable
 if [ "$BACKEND_PRESENT" == "yes" ]; then
-  cat >> "$CONF_PATH" <<EOF
-
-    # Backend configuration
+    echo "
+    # Backend API requests
     location $BACKEND_ROUTE {
         proxy_pass http://localhost:$BACKEND_PORT;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
         proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
-    }
-EOF
+    }" >> $OUTPUT_FILE
 fi
 
-# Deny access to hidden files
-cat >> "$CONF_PATH" <<EOF
-    location ~ /\. {
-        deny all;
-    }
-}
-EOF
+echo "}" >> $OUTPUT_FILE
 
-# Test and reload nginx
-echo -e "\n✅ Nginx config written to $CONF_PATH"
-echo -e "\n🔍 Configuration file content:"
-cat "$CONF_PATH"
+# Check if the file was created successfully or not
+if [ ! -f "$OUTPUT_FILE" ]; then
+    echo "Failed to create the Nginx configuration file."
+    exit 1
+fi
 
-echo -e "\n🚀 Testing Nginx configuration..."
+echo "Nginx configuration created at $OUTPUT_FILE"
+
+# Test Nginx configuration for syntax errors
+echo "Testing Nginx configuration..."
 if ! nginx -t; then
-  echo -e "\n❌ Nginx configuration test failed. Please check the errors above."
-  exit 1
+    echo "Nginx configuration test failed. Please check your config."
+    exit 1
 fi
 
-echo -e "\n🔄 Reloading Nginx..."
-systemctl reload nginx
-
-echo -e "\n🎉 Nginx successfully reloaded with new configuration!"
-echo "📝 Logs can be found at:"
-echo "   - /var/log/nginx/${FILE_NAME}_error.log"
-echo "   - /var/log/nginx/${FILE_NAME}_access.log"
+# Reload Nginx to apply the new configuration
+echo "Restarting Nginx..."
+if systemctl restart nginx; then
+    echo "Nginx restarted successfully."
+else
+    echo "Failed to restart Nginx. Please check the service status."
+    exit 1
+fi
