@@ -1,30 +1,31 @@
 #!/bin/bash
 
-# USAGE:
-# sudo ./nginx-file.sh <file-name> <domain> <frontend: yes/no> <frontend-route> <frontend-port> <backend: yes/no> <backend-route> <backend-port>
-
-# Example:
-# sudo ./nginx-file.sh demo yourdomain.com yes / 5173 yes /api 3000
-
+# Check if running with sudo privileges to write in /etc/nginx/conf.d/ 
+# because it is protected and require root acces
 if [ "$EUID" -ne 0 ]; then
-  echo "❌ Please run with sudo privileges (root access required for /etc/nginx/conf.d/)"
+  echo "Please run with sudo privileges to write to /etc/nginx/conf.d/"
   exit 1
 fi
 
 # Check if Nginx is installed
-if ! command -v nginx &>/dev/null; then
-  echo "❌ Nginx is not installed. Please install Nginx first."
-  exit 1
+if ! command -v nginx &> /dev/null; then
+    echo "Nginx is not installed. Please install Nginx first."
+    exit 1
 fi
 
-# Validate number of args
+# Check if /etc/nginx/conf.d/ exists, create it if not
+if [ ! -d "/etc/nginx/conf.d" ]; then
+    echo "/etc/nginx/conf.d/ directory does not exist. Creating it..."
+    mkdir -p /etc/nginx/conf.d/
+fi
+
+# Check if enough arguments are passed
 if [ "$#" -ne 8 ]; then
-  echo "Usage: $0 <file-name> <domain> <frontend: yes/no> <frontend-route> <frontend-port> <backend: yes/no> <backend-route> <backend-port>"
-  echo "Example: $0 demo yourdomain.com yes / 5173 yes /api 3000"
-  exit 1
+    echo "Usage: $0 <file-name> <ip/domain> <frontend: yes/no> <frontend-route> <frontend-port> <backend: yes/no> <backend-route> <backend-port>"
+    exit 1
 fi
 
-# Input variables
+# Assign input arguments
 FILE_NAME=$1
 DOMAIN=$2
 FRONTEND_PRESENT=$3
@@ -36,28 +37,20 @@ BACKEND_PORT=$8
 
 CONF_PATH="/etc/nginx/conf.d/$FILE_NAME.conf"
 
-# Validate inputs
-if [ "$FRONTEND_PRESENT" != "yes" ] && [ "$FRONTEND_PRESENT" != "no" ]; then
-  echo "❌ Frontend presence must be 'yes' or 'no'"
-  exit 1
-fi
-
-if [ "$BACKEND_PRESENT" != "yes" ] && [ "$BACKEND_PRESENT" != "no" ]; then
-  echo "❌ Backend presence must be 'yes' or 'no'"
-  exit 1
-fi
-
+# Validate that ports are numbers if they are present
+# For frontend
 if [ "$FRONTEND_PRESENT" == "yes" ] && ! [[ "$FRONTEND_PORT" =~ ^[0-9]+$ ]]; then
-  echo "❌ Frontend port must be numeric."
-  exit 1
+    echo "Error: Frontend port must be a numeric value."
+    exit 1
 fi
 
+# For backend
 if [ "$BACKEND_PRESENT" == "yes" ] && ! [[ "$BACKEND_PORT" =~ ^[0-9]+$ ]]; then
-  echo "❌ Backend port must be numeric."
-  exit 1
+    echo "Error: Backend port must be a numeric value."
+    exit 1
 fi
 
-# Write the base server block
+# Write the Nginx configuration to the file
 cat > "$CONF_PATH" <<EOF
 server {
     listen 80;
@@ -110,22 +103,10 @@ cat >> "$CONF_PATH" <<EOF
 }
 EOF
 
-# Test and reload nginx
-echo -e "\n✅ Nginx config written to $CONF_PATH"
-echo -e "\n🔍 Configuration file content:"
-cat "$CONF_PATH"
+# Config test and reload
+nginx -t || { echo "Error: Invalid Nginx configuration"; exit 1; }
+systemctl reload nginx || { echo "Error: Nginx reload failed"; exit 1; }
 
-echo -e "\n🚀 Testing Nginx configuration..."
-if ! nginx -t; then
-  echo -e "\n❌ Nginx configuration test failed. Please check the errors above."
-  exit 1
-fi
-
-echo -e "\n🔄 Reloading Nginx..."
-systemctl reload nginx
-
-echo -e "\n🎉 Nginx successfully reloaded with new configuration!"
-echo "📝 Logs can be found at:"
-echo "   - /var/log/nginx/${FILE_NAME}_error.log"
-echo "   - /var/log/nginx/${FILE_NAME}_access.log"
+echo "Success: Nginx configuration applied"
+echo "Config: $CONF_PATH"
 
