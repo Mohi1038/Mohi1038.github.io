@@ -50,31 +50,38 @@ install_runtime() {
 
 # ----------------------------
 # SERVICE CREATION
+# ----------------------------
 create_service() {
-    local procfile=$(find "$APP_SUBFOLDER" -maxdepth 1 -name "Procfile" | head -1)
-    [ -z "$procfile" ] && procfile=$(find "$APP_DIR" -maxdepth 1 -name "Procfile" | head -1)
-
+    # Find Procfile (search up to 2 levels deep)
+    local procfile=$(find "$APP_DIR" -maxdepth 2 -name "Procfile" | head -1)
     if [ -z "$procfile" ]; then
-        echo "⚠️ No Procfile found - cannot create service"
+        echo "❌ No Procfile found in $APP_DIR or subdirectories"
         exit 1
     fi
-
     echo "🔍 Found Procfile at $procfile"
 
-    while IFS=':' read -r process_type command; do
-        process_type=$(echo "$process_type" | xargs)
-        command=$(echo "$command" | xargs)
-        
-        if [[ "$process_type" == "web" ]]; then
-            echo "🚀 Found web process command: $command"
-            
-            # Get absolute working directory
-            local working_dir=$(dirname "$(realpath "$procfile")")
-            
-            # Auto-detect port from command if available
-            local detected_port=$(echo "$command" | grep -oP '(--port[ =]|-p )\K[0-9]+' | head -1)
+    # Determine working directory
+    local working_dir=$(dirname "$procfile")
+    echo "📂 Using working directory: $working_dir"
 
-            sudo bash -c "cat > /etc/systemd/system/${REPO_NAME}.service" <<EOF
+    # Extract web process command
+    local command=$(grep "^web:" "$procfile" | cut -d':' -f2- | sed 's/^[ \t]*//')
+    if [ -z "$command" ]; then
+        echo "❌ No web process found in Procfile"
+        exit 1
+    fi
+    echo "🚀 Detected command: $command"
+
+    # Auto-detect port (supports most common formats)
+    local detected_port=$(
+        echo "$command" | grep -oE '\b(--port|-p|PORT=)[ =]?[0-9]+\b' | 
+        grep -oE '[0-9]+' | head -1
+    )
+    echo "🔌 Auto-detected port: ${detected_port:-none}"
+
+    # Create systemd service
+    echo "📝 Creating service file..."
+    sudo bash -c "cat > /etc/systemd/system/${REPO_NAME}.service" <<EOF
 [Unit]
 Description=$REPO_NAME Service
 After=network.target
@@ -92,50 +99,35 @@ ${detected_port:+Environment=PORT=$detected_port}
 WantedBy=multi-user.target
 EOF
 
-            sudo systemctl daemon-reload
-            sudo systemctl enable "${REPO_NAME}"
-            sudo systemctl start "${REPO_NAME}"
+    # Enable and start service
+    echo "⚡ Starting service..."
+    sudo systemctl daemon-reload
+    sudo systemctl enable "${REPO_NAME}"
+    sudo systemctl restart "${REPO_NAME}"
 
-            echo "⏳ Waiting for service to start..."
-
-            for attempt in {1..15}; do
-                sleep 2
-                if sudo systemctl is-active --quiet "${REPO_NAME}"; then
-                    if [ -n "$detected_port" ]; then
-                        if nc -z localhost "$detected_port"; then
-                            echo "✅ Service is active and port $detected_port is listening"
-                            return
-                        else
-                            echo "⏳ Waiting for port $detected_port (attempt $attempt)..."
-                        fi
-                    else
-                        echo "✅ Service is active (no port detected to verify)"
-                        return
-                    fi
-                else
-                    echo "⏳ Waiting for service to become active (attempt $attempt)..."
-                fi
-            done
-
-            echo "❌ Service failed to start or port $detected_port is not listening"
-            echo "📜 Last logs:"
-            journalctl -u "${REPO_NAME}" -n 15 --no-pager
-            exit 1
+    # Verify service status
+    echo "🔄 Verifying service..."
+    for i in {1..5}; do
+        if sudo systemctl is-active --quiet "${REPO_NAME}"; then
+            echo "✅ Service started successfully"
+            return 0
         fi
-    done < "$procfile"
+        sleep 2
+    done
 
-    echo "⚠️ No web process found in Procfile"
+    echo "❌ Failed to start service"
+    echo "📜 Last logs:"
+    journalctl -u "${REPO_NAME}" -n 20 --no-pager
     exit 1
 }
 
 # ----------------------------
-# MAIN
+# MAIN EXECUTION
 # ----------------------------
-echo "📁 Target project: $APP_DIR"
+echo "📁 Starting deployment for: $APP_DIR"
 install_runtime
 create_service
 
-echo "🎉 Deployment finished!"
-echo "📦 To check service: sudo systemctl status $REPO_NAME"
-echo "📜 To see logs: journalctl -u $REPO_NAME -f"
-
+echo "🎉 Deployment completed successfully!"
+echo "🔍 Service status: sudo systemctl status ${REPO_NAME}"
+echo "📜 View logs: journalctl -u ${REPO_NAME} -f"
