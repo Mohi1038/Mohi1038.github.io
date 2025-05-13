@@ -87,7 +87,7 @@ chmod +t /root
 # Verify nginx can access the directory
 sudo -u www-data ls "$PROJECT_DIR" >/dev/null 2>&1
 if [ $? -ne 0 ]; then
-    echo "Warning: Nginx still cannot access the directory.
+    echo "Warning: Nginx still cannot access the directory."
     chmod a+x / 
     chmod 777 "$PROJECT_DIR"
 fi
