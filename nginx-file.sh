@@ -7,20 +7,24 @@
 # sudo ./nginx-file.sh demo yourdomain.com yes / 5173 yes /api 3000
 
 if [ "$EUID" -ne 0 ]; then
-  echo "❌ Run with sudo (root privileges required)"
+  echo "❌ Please run with sudo privileges (root access required for /etc/nginx/conf.d/)"
   exit 1
 fi
 
+# Check if Nginx is installed
 if ! command -v nginx &>/dev/null; then
-  echo "❌ Nginx is not installed"
+  echo "❌ Nginx is not installed. Please install Nginx first."
   exit 1
 fi
 
+# Validate number of args
 if [ "$#" -ne 8 ]; then
   echo "Usage: $0 <file-name> <domain> <frontend: yes/no> <frontend-route> <frontend-port> <backend: yes/no> <backend-route> <backend-port>"
+  echo "Example: $0 demo yourdomain.com yes / 5173 yes /api 3000"
   exit 1
 fi
 
+# Input variables
 FILE_NAME=$1
 DOMAIN=$2
 FRONTEND_PRESENT=$3
@@ -32,15 +36,39 @@ BACKEND_PORT=$8
 
 CONF_PATH="/etc/nginx/conf.d/$FILE_NAME.conf"
 
+# Validate inputs
+if [ "$FRONTEND_PRESENT" != "yes" ] && [ "$FRONTEND_PRESENT" != "no" ]; then
+  echo "❌ Frontend presence must be 'yes' or 'no'"
+  exit 1
+fi
+
+if [ "$BACKEND_PRESENT" != "yes" ] && [ "$BACKEND_PRESENT" != "no" ]; then
+  echo "❌ Backend presence must be 'yes' or 'no'"
+  exit 1
+fi
+
+if [ "$FRONTEND_PRESENT" == "yes" ] && ! [[ "$FRONTEND_PORT" =~ ^[0-9]+$ ]]; then
+  echo "❌ Frontend port must be numeric."
+  exit 1
+fi
+
+if [ "$BACKEND_PRESENT" == "yes" ] && ! [[ "$BACKEND_PORT" =~ ^[0-9]+$ ]]; then
+  echo "❌ Backend port must be numeric."
+  exit 1
+fi
+
+# Write the base server block
 cat > "$CONF_PATH" <<EOF
 server {
     listen 80;
     server_name $DOMAIN;
 EOF
 
+# Add frontend route if applicable
 if [ "$FRONTEND_PRESENT" == "yes" ]; then
   cat >> "$CONF_PATH" <<EOF
 
+    # Frontend configuration
     location $FRONTEND_ROUTE {
         proxy_pass http://localhost:$FRONTEND_PORT;
         proxy_http_version 1.1;
@@ -55,9 +83,11 @@ if [ "$FRONTEND_PRESENT" == "yes" ]; then
 EOF
 fi
 
+# Add backend route if applicable
 if [ "$BACKEND_PRESENT" == "yes" ]; then
   cat >> "$CONF_PATH" <<EOF
 
+    # Backend configuration
     location $BACKEND_ROUTE {
         proxy_pass http://localhost:$BACKEND_PORT;
         proxy_http_version 1.1;
@@ -72,11 +102,30 @@ if [ "$BACKEND_PRESENT" == "yes" ]; then
 EOF
 fi
 
+# Deny access to hidden files
 cat >> "$CONF_PATH" <<EOF
+    location ~ /\. {
+        deny all;
+    }
 }
 EOF
 
-echo -e "\n✅ Config written to $CONF_PATH"
+# Test and reload nginx
+echo -e "\n✅ Nginx config written to $CONF_PATH"
+echo -e "\n🔍 Configuration file content:"
+cat "$CONF_PATH"
 
-nginx -t && systemctl reload nginx && echo "🚀 Nginx reloaded successfully"
+echo -e "\n🚀 Testing Nginx configuration..."
+if ! nginx -t; then
+  echo -e "\n❌ Nginx configuration test failed. Please check the errors above."
+  exit 1
+fi
+
+echo -e "\n🔄 Reloading Nginx..."
+systemctl reload nginx
+
+echo -e "\n🎉 Nginx successfully reloaded with new configuration!"
+echo "📝 Logs can be found at:"
+echo "   - /var/log/nginx/${FILE_NAME}_error.log"
+echo "   - /var/log/nginx/${FILE_NAME}_access.log"
 
