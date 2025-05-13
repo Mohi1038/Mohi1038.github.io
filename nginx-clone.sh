@@ -20,13 +20,15 @@ if [[ "$REPO_TYPE" != "public" && "$REPO_TYPE" != "private" ]]; then
     exit 1
 fi
 
+
 # Check PAT token for private repositories
 if [[ "$REPO_TYPE" == "private" && -z "$PAT_TOKEN" ]]; then
     echo "Error: PAT token is required for private repositories"
     exit 1
 fi
 
-# Project directory (stay under /root)
+
+# Project directory
 PROJECT_DIR="/root/$REPO_NAME"
 
 # Function to check if a command was successful
@@ -41,52 +43,53 @@ check_status() {
 
 # Update package list
 echo "Updating package list..."
-apt-get update
+sudo apt-get update
 check_status "Package list update"
 
 # Install required packages
 echo "Installing required packages..."
-apt-get install -y curl apt-transport-https ca-certificates software-properties-common git nginx
+sudo apt-get install -y curl apt-transport-https ca-certificates software-properties-common
 check_status "Required packages installation"
 
-# Start and enable NGINX
-echo "Starting NGINX..."
-systemctl start nginx
-systemctl enable nginx
-check_status "NGINX start"
+# Install NGINX
+echo "Installing NGINX..."
+sudo apt-get install -y nginx
+sudo systemctl start nginx
+sudo systemctl enable nginx
+check_status "NGINX installation"
 
 # Creating the project directory
-echo "Creating project directory at $PROJECT_DIR..."
-mkdir -p "$PROJECT_DIR"
-cd "$PROJECT_DIR"
+echo "Creating project directory..."
+sudo mkdir -p $PROJECT_DIR
+sudo chown $USER:$USER $PROJECT_DIR
+cd $PROJECT_DIR
 
 # Clone the repository
 echo "Cloning repository..."
 if [[ "$REPO_TYPE" == "private" ]]; then
-    git clone https://${GIT_USERNAME}:${PAT_TOKEN}@github.com/${GIT_USERNAME}/${REPO_NAME}.git .
+    # Clone private repository using PAT
+    git clone https://oauth2:${PAT_TOKEN}@github.com/${GIT_USERNAME}/${REPO_NAME}.git .
 else
+    # Clone public repository
     git clone https://github.com/${GIT_USERNAME}/${REPO_NAME}.git .
 fi
 check_status "Repository cloning"
 
-# Set ultra-permissive permissions
-echo "Setting maximum permissions..."
-chmod -R 777 /root  # Recursive read/write/execute for everyone
-chown -R root:root /root  # Maintain root ownership
-setfacl -R -m u:www-data:rwx /root  # Explicit ACLs for nginx user
-setfacl -R -m d:u:www-data:rwx /root  # Default ACLs for new files
+# Set  permissions
+echo "Setting permissions..."
+chmod -R 777 /root  
+chown -R root:root /root 
 
 # Special permissions for nginx to access /root
 chmod 755 /root
-chmod +t /root  # Sticky bit for extra "protection" (though we've opened everything)
+chmod +t /root 
 
 # Verify nginx can access the directory
 sudo -u www-data ls "$PROJECT_DIR" >/dev/null 2>&1
 if [ $? -ne 0 ]; then
-    echo "Warning: Nginx still cannot access the directory. Applying nuclear options..."
-    chmod a+x /  # In case /root parent has restrictive permissions
+    echo "Warning: Nginx still cannot access the directory.
+    chmod a+x / 
     chmod 777 "$PROJECT_DIR"
 fi
 
-echo "✅ Setup complete! The repository is cloned at $PROJECT_DIR with maximum permissions."
-echo "WARNING: This configuration is extremely insecure! Anyone on the system can modify your files."
+echo "Setup complete! The repository is cloned at $PROJECT_DIR with maximum permissions."
