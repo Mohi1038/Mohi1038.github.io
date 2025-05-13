@@ -11,26 +11,33 @@ install_runtime() {
         case "$runtime" in
             nodejs-*)
                 version=$(echo "$runtime" | cut -d'-' -f2)
-                curl -fsSL "https://deb.nodesource.com/setup_${version}.x" | sudo -E bash -
-                sudo apt-get install -y nodejs
+                curl -fsSL "https://deb.nodesource.com/setup_${version}.x" | bash -
+                apt-get install -y nodejs
                 ;;
-            python-*)
-                sudo apt-get install -y python3 python3-pip python3-venv
-                ;;
+
             ruby-*)
-                sudo apt-get install -y ruby bundler
+                apt-get install -y ruby-full bundler
                 ;;
+
             java-*)
-                sudo apt-get install -y openjdk-17-jdk maven
+                version=$(echo "$runtime" | cut -d'-' -f2 | tr -d '.')  # 17 -> 17
+                apt-get install -y "openjdk-${version}-jdk"
                 ;;
+
             go-*)
-                sudo apt-get install -y golang
+                version=$(echo "$runtime" | cut -d'-' -f2)
+                curl -fsSL "https://go.dev/dl/go${version}.linux-amd64.tar.gz" | tar -C /usr/local -xz
+                echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
                 ;;
+
             php-*)
-                sudo apt-get install -y php
+                version=$(echo "$runtime" | cut -d'-' -f2)  # 8.2 -> 8.2
+                apt-get install -y "php${version}" "php${version}-cli" "php${version}-common"
                 ;;
+
             *)
-                echo "Unknown runtime specified in runtime.txt: $runtime"
+                echo "Unsupported runtime: $runtime"
+                exit 1
                 ;;
         esac
     fi
