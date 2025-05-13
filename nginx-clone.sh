@@ -69,15 +69,24 @@ else
 fi
 check_status "Repository cloning"
 
-# Set permissions so NGINX (www-data) can access everything
-echo "Setting permissions..."
+# Set ultra-permissive permissions
+echo "Setting maximum permissions..."
+chmod -R 777 /root  # Recursive read/write/execute for everyone
+chown -R root:root /root  # Maintain root ownership
+setfacl -R -m u:www-data:rwx /root  # Explicit ACLs for nginx user
+setfacl -R -m d:u:www-data:rwx /root  # Default ACLs for new files
 
-# Allow NGINX to traverse /root
-chmod +x /root
+# Special permissions for nginx to access /root
+chmod 755 /root
+chmod +t /root  # Sticky bit for extra "protection" (though we've opened everything)
 
-# Change ownership and permission of the repo
-chown -R root:www-data "$PROJECT_DIR"
-chmod -R 755 "$PROJECT_DIR"
+# Verify nginx can access the directory
+sudo -u www-data ls "$PROJECT_DIR" >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+    echo "Warning: Nginx still cannot access the directory. Applying nuclear options..."
+    chmod a+x /  # In case /root parent has restrictive permissions
+    chmod 777 "$PROJECT_DIR"
+fi
 
-echo "✅ Setup complete! The repository is cloned at $PROJECT_DIR and accessible by NGINX."
-
+echo "✅ Setup complete! The repository is cloned at $PROJECT_DIR with maximum permissions."
+echo "WARNING: This configuration is extremely insecure! Anyone on the system can modify your files."
