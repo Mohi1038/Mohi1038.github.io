@@ -41,27 +41,23 @@ check_status() {
 
 # Update package list
 echo "Updating package list..."
-sudo apt-get update
+apt-get update
 check_status "Package list update"
 
 # Install required packages
 echo "Installing required packages..."
-sudo apt-get install -y curl apt-transport-https ca-certificates software-properties-common
+apt-get install -y curl apt-transport-https ca-certificates software-properties-common git nginx
 check_status "Required packages installation"
 
-# Install NGINX
-echo "Installing NGINX..."
-sudo apt-get install -y nginx
-check_status "NGINX installation"
-
 # Start and enable NGINX
-sudo systemctl start nginx
-sudo systemctl enable nginx
+echo "Starting NGINX..."
+systemctl start nginx
+systemctl enable nginx
+check_status "NGINX start"
 
 # Creating the project directory
-echo "Creating project directory..."
-sudo mkdir -p "$PROJECT_DIR"
-sudo chown root:root "$PROJECT_DIR"
+echo "Creating project directory at $PROJECT_DIR..."
+mkdir -p "$PROJECT_DIR"
 cd "$PROJECT_DIR"
 
 # Clone the repository
@@ -73,9 +69,15 @@ else
 fi
 check_status "Repository cloning"
 
-# Set permissions
+# Set permissions so NGINX (www-data) can access everything
 echo "Setting permissions..."
-sudo chown -R root:www-data "$PROJECT_DIR"
-sudo chmod -R 775 "$PROJECT_DIR"
 
-echo "✅ Setup complete! The repository is cloned at $PROJECT_DIR."
+# Allow NGINX to traverse /root
+chmod +x /root
+
+# Change ownership and permission of the repo
+chown -R root:www-data "$PROJECT_DIR"
+chmod -R 755 "$PROJECT_DIR"
+
+echo "✅ Setup complete! The repository is cloned at $PROJECT_DIR and accessible by NGINX."
+
