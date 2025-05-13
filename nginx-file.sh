@@ -36,39 +36,23 @@ BACKEND_PORT=$8
 
 CONF_PATH="/etc/nginx/conf.d/$FILE_NAME.conf"
 
-# Validate inputs
-if [ "$FRONTEND_PRESENT" != "yes" ] && [ "$FRONTEND_PRESENT" != "no" ]; then
-  echo "❌ Frontend presence must be 'yes' or 'no'"
-  exit 1
-fi
-
-if [ "$BACKEND_PRESENT" != "yes" ] && [ "$BACKEND_PRESENT" != "no" ]; then
-  echo "❌ Backend presence must be 'yes' or 'no'"
-  exit 1
-fi
-
+# Validate that ports are numbers if they are present
+# For frontend
 if [ "$FRONTEND_PRESENT" == "yes" ] && ! [[ "$FRONTEND_PORT" =~ ^[0-9]+$ ]]; then
-  echo "❌ Frontend port must be numeric."
-  exit 1
+    echo "Error: Frontend port must be a numeric value."
+    exit 1
 fi
 
+# For backend
 if [ "$BACKEND_PRESENT" == "yes" ] && ! [[ "$BACKEND_PORT" =~ ^[0-9]+$ ]]; then
-  echo "❌ Backend port must be numeric."
-  exit 1
-fi
-
-# Backup existing config if it exists
-if [ -f "$CONF_PATH" ]; then
-  BACKUP_PATH="/etc/nginx/conf.d/$FILE_NAME.conf.bak_$(date +%Y%m%d%H%M%S)"
-  cp "$CONF_PATH" "$BACKUP_PATH"
-  echo "⚠️ Existing config backed up to $BACKUP_PATH"
+    echo "Error: Backend port must be a numeric value."
+    exit 1
 fi
 
 # Write the base server block
 cat > "$CONF_PATH" <<EOF
 server {
     listen 80;
-    listen [::]:80;
     server_name $DOMAIN;
 
     # Security headers
@@ -95,7 +79,7 @@ if [ "$FRONTEND_PRESENT" == "yes" ]; then
 
     # Frontend configuration
     location $FRONTEND_ROUTE {
-        proxy_pass http://127.0.0.1:$FRONTEND_PORT;
+        proxy_pass http://localhost:$FRONTEND_PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -104,10 +88,6 @@ if [ "$FRONTEND_PRESENT" == "yes" ]; then
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_cache_bypass \$http_upgrade;
-        proxy_read_timeout 300s;
-        
-        # For SPA fallback
-        try_files \$uri \$uri/ /index.html;
     }
 EOF
 fi
@@ -118,7 +98,7 @@ if [ "$BACKEND_PRESENT" == "yes" ]; then
 
     # Backend configuration
     location $BACKEND_ROUTE {
-        proxy_pass http://127.0.0.1:$BACKEND_PORT;
+        proxy_pass http://localhost:$BACKEND_PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -127,26 +107,12 @@ if [ "$BACKEND_PRESENT" == "yes" ]; then
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_cache_bypass \$http_upgrade;
-        proxy_read_timeout 300s;
-        
-        # Increase timeout for backend APIs if needed
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
     }
 EOF
 fi
 
-# Close server block
+# Deny access to hidden files
 cat >> "$CONF_PATH" <<EOF
-
-    # Static files cache (1 year)
-    location ~* \.(?:jpg|jpeg|gif|png|ico|css|js|svg|woff2)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-        try_files \$uri =404;
-    }
-
-    # Deny access to hidden files
     location ~ /\. {
         deny all;
     }
@@ -161,11 +127,6 @@ cat "$CONF_PATH"
 echo -e "\n🚀 Testing Nginx configuration..."
 if ! nginx -t; then
   echo -e "\n❌ Nginx configuration test failed. Please check the errors above."
-  if [ -n "$BACKUP_PATH" ]; then
-    echo "⚠️ Restoring backup configuration..."
-    mv "$BACKUP_PATH" "$CONF_PATH"
-    nginx -t && systemctl reload nginx
-  fi
   exit 1
 fi
 
