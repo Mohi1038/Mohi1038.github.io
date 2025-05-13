@@ -20,6 +20,7 @@ fi
 # Validate number of args
 if [ "$#" -ne 8 ]; then
   echo "Usage: $0 <file-name> <domain> <frontend: yes/no> <frontend-route> <frontend-port> <backend: yes/no> <backend-route> <backend-port>"
+  echo "Example: $0 demo yourdomain.com yes / 5173 yes /api 3000"
   exit 1
 fi
 
@@ -35,7 +36,17 @@ BACKEND_PORT=$8
 
 CONF_PATH="/etc/nginx/conf.d/$FILE_NAME.conf"
 
-# Validate ports if present
+# Validate inputs
+if [ "$FRONTEND_PRESENT" != "yes" ] && [ "$FRONTEND_PRESENT" != "no" ]; then
+  echo "❌ Frontend presence must be 'yes' or 'no'"
+  exit 1
+fi
+
+if [ "$BACKEND_PRESENT" != "yes" ] && [ "$BACKEND_PRESENT" != "no" ]; then
+  echo "❌ Backend presence must be 'yes' or 'no'"
+  exit 1
+fi
+
 if [ "$FRONTEND_PRESENT" == "yes" ] && ! [[ "$FRONTEND_PORT" =~ ^[0-9]+$ ]]; then
   echo "❌ Frontend port must be numeric."
   exit 1
@@ -46,6 +57,13 @@ if [ "$BACKEND_PRESENT" == "yes" ] && ! [[ "$BACKEND_PORT" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
+# Backup existing config if it exists
+if [ -f "$CONF_PATH" ]; then
+  BACKUP_PATH="/etc/nginx/conf.d/$FILE_NAME.conf.bak_$(date +%Y%m%d%H%M%S)"
+  cp "$CONF_PATH" "$BACKUP_PATH"
+  echo "⚠️ Existing config backed up to $BACKUP_PATH"
+fi
+
 # Write the base server block
 cat > "$CONF_PATH" <<EOF
 server {
@@ -53,25 +71,42 @@ server {
     listen [::]:80;
     server_name $DOMAIN;
 
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN";
+    add_header X-Content-Type-Options "nosniff";
+    add_header Referrer-Policy "strict-origin-when-cross-origin";
+
     # Enable compression
     gzip on;
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+    gzip_min_length 1024;
+    gzip_proxied any;
 
-    index index.html;
+    # Error handling
+    error_log /var/log/nginx/${FILE_NAME}_error.log warn;
+    access_log /var/log/nginx/${FILE_NAME}_access.log;
+
+    client_max_body_size 100M;
 EOF
 
 # Add frontend route if applicable
 if [ "$FRONTEND_PRESENT" == "yes" ]; then
   cat >> "$CONF_PATH" <<EOF
 
-    # Frontend reverse proxy
+    # Frontend configuration
     location $FRONTEND_ROUTE {
-        proxy_pass http://localhost:$FRONTEND_PORT;
+        proxy_pass http://127.0.0.1:$FRONTEND_PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection keep-alive;
+        proxy_set_header Connection 'upgrade';
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_cache_bypass \$http_upgrade;
+        proxy_read_timeout 300s;
+        
+        # For SPA fallback
         try_files \$uri \$uri/ /index.html;
     }
 EOF
@@ -81,22 +116,63 @@ fi
 if [ "$BACKEND_PRESENT" == "yes" ]; then
   cat >> "$CONF_PATH" <<EOF
 
-    # Backend reverse proxy
+    # Backend configuration
     location $BACKEND_ROUTE {
-        proxy_pass http://localhost:$BACKEND_PORT;
+        proxy_pass http://127.0.0.1:$BACKEND_PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection keep-alive;
+        proxy_set_header Connection 'upgrade';
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_cache_bypass \$http_upgrade;
+        proxy_read_timeout 300s;
+        
+        # Increase timeout for backend APIs if needed
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
     }
 EOF
 fi
 
 # Close server block
-echo "}" >> "$CONF_PATH"
+cat >> "$CONF_PATH" <<EOF
 
-# Reload nginx
-echo "✅ Nginx config written to $CONF_PATH"
-nginx -t && systemctl reload nginx && echo "🔄 Nginx reloaded successfully."
+    # Static files cache (1 year)
+    location ~* \.(?:jpg|jpeg|gif|png|ico|css|js|svg|woff2)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files \$uri =404;
+    }
 
+    # Deny access to hidden files
+    location ~ /\. {
+        deny all;
+    }
+}
+EOF
+
+# Test and reload nginx
+echo -e "\n✅ Nginx config written to $CONF_PATH"
+echo -e "\n🔍 Configuration file content:"
+cat "$CONF_PATH"
+
+echo -e "\n🚀 Testing Nginx configuration..."
+if ! nginx -t; then
+  echo -e "\n❌ Nginx configuration test failed. Please check the errors above."
+  if [ -n "$BACKUP_PATH" ]; then
+    echo "⚠️ Restoring backup configuration..."
+    mv "$BACKUP_PATH" "$CONF_PATH"
+    nginx -t && systemctl reload nginx
+  fi
+  exit 1
+fi
+
+echo -e "\n🔄 Reloading Nginx..."
+systemctl reload nginx
+
+echo -e "\n🎉 Nginx successfully reloaded with new configuration!"
+echo "📝 Logs can be found at:"
+echo "   - /var/log/nginx/${FILE_NAME}_error.log"
+echo "   - /var/log/nginx/${FILE_NAME}_access.log"
